@@ -10,6 +10,12 @@ library(ggthemes)
 library(treemapify)
 library(ggfortify)
 library(lubridate)
+library(zoo)
+library(plyr)
+library(forecast)
+library(ggdendro)
+library(ggmap)
+
 
 ### SOURCE ###
 ### http://r-statistics.co/Top50-Ggplot2-Visualizations-MasterList-R-Code.html
@@ -550,7 +556,7 @@ desnityplot <- desnityplot + geom_density(aes(fill=factor(cyl)), alpha=0.8) +
        x="City Mileage",
        fill="# Cylinders")
 
-png(filename = "desnityplot")
+png(filename = "desnityplot.png")
 plot(desnityplot)
 dev.off()
 
@@ -915,3 +921,315 @@ yearlytimeseries <- ggplot(economics_y, aes(x=date)) +
 png(filename = "yearlytimeseries.png")
 plot(yearlytimeseries)
 dev.off()
+
+####################################################
+#Time Series Plot From Long Data Format: Multiple Time Series in Same Dataframe Column
+####################################################
+#Uses: library(ggplot2)
+#Uses: library(lubridate)
+
+data(economics_long, package = "ggplot2")
+head(economics_long)
+#>         date variable value      value01
+#>       <date>   <fctr> <dbl>        <dbl>
+#> 1 1967-07-01      pce 507.4 0.0000000000
+#> 2 1967-08-01      pce 510.5 0.0002660008
+#> 3 1967-09-01      pce 516.3 0.0007636797
+#> 4 1967-10-01      pce 512.9 0.0004719369
+#> 5 1967-11-01      pce 518.1 0.0009181318
+#> 6 1967-12-01      pce 525.8 0.0015788435
+
+theme_set(theme_bw())
+
+df <- economics_long[economics_long$variable %in% c("psavert", "uempmed"), ]
+df <- df[lubridate::year(df$date) %in% c(1967:1981), ]
+
+# labels and breaks for X axis text
+brks <- df$date[seq(1, length(df$date), 12)]
+lbls <- lubridate::year(brks)
+
+# plot
+longts <- ggplot(df, aes(x=date)) + 
+  geom_line(aes(y=value, col=variable)) + 
+  labs(title="Time Series of Returns Percentage", 
+       subtitle="Drawn from Long Data format", 
+       caption="Source: Economics", 
+       y="Returns %", 
+       color=NULL) +  # title and caption
+  scale_x_date(labels = lbls, breaks = brks) +  # change to monthly ticks and labels
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d")) +  # line color
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5, size = 8),  # rotate x axis text
+        panel.grid.minor = element_blank())  # turn off minor grid
+
+png(filename = "TimeSeriesLongDataFormat.png")
+plot(longts)
+dev.off()
+
+####################################################
+#Time Series Plot From Wide Data Format: Data in Multiple Columns of Dataframe
+####################################################
+#Uses: library(ggplot2)
+#Uses: library(lubridate)
+
+theme_set(theme_bw())
+
+df <- economics[, c("date", "psavert", "uempmed")]
+df <- df[lubridate::year(df$date) %in% c(1967:1981), ]
+
+# labels and breaks for X axis text
+brks <- df$date[seq(1, length(df$date), 12)]
+lbls <- lubridate::year(brks)
+
+# plot
+widets <- ggplot(df, aes(x=date)) + 
+  geom_line(aes(y=psavert, col="psavert")) + 
+  geom_line(aes(y=uempmed, col="uempmed")) + 
+  labs(title="Time Series of Returns Percentage", 
+       subtitle="Drawn From Wide Data format", 
+       caption="Source: Economics", y="Returns %") +  # title and caption
+  scale_x_date(labels = lbls, breaks = brks) +  # change to monthly ticks and labels
+  scale_color_manual(name="", 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d")) +  # line color
+  theme(panel.grid.minor = element_blank())  # turn off minor grid
+
+png(filename = "TimeSeriesWideDataFormat.png")
+plot(widets)
+dev.off()
+
+####################################################
+#Stacked Area Chart
+####################################################
+#Uses: library(ggplot2)
+#Uses: library(lubridate)
+
+df <- economics[, c("date", "psavert", "uempmed")]
+df <- df[lubridate::year(df$date) %in% c(1967:1981), ]
+
+# labels and breaks for X axis text
+brks <- df$date[seq(1, length(df$date), 12)]
+lbls <- lubridate::year(brks)
+
+# plot
+stackedarea <- ggplot(df, aes(x=date)) + 
+  geom_area(aes(y=psavert+uempmed, fill="psavert")) + 
+  geom_area(aes(y=uempmed, fill="uempmed")) + 
+  labs(title="Area Chart of Returns Percentage", 
+       subtitle="From Wide Data format", 
+       caption="Source: Economics", 
+       y="Returns %") +  # title and caption
+  scale_x_date(labels = lbls, breaks = brks) +  # change to monthly ticks and labels
+  scale_fill_manual(name="", 
+                    values = c("psavert"="#00ba38", "uempmed"="#f8766d")) +  # line color
+  theme(panel.grid.minor = element_blank())  # turn off minor grid
+
+png(filename = "stackedarea.png")
+plot(stackedarea)
+dev.off()
+
+####################################################
+#Calendar Heatmap
+####################################################
+#Uses: library(ggplot2)
+#Uses: library(plyr)
+#Uses: library(scales)
+#Uses: library(zoo)
+
+df <- read.csv("https://raw.githubusercontent.com/selva86/datasets/master/yahoo.csv")
+df$date <- as.Date(df$date)  # format date
+df <- df[df$year >= 2012, ]  # filter reqd years
+
+# Create Month Week
+df$yearmonth <- as.yearmon(df$date)
+df$yearmonthf <- factor(df$yearmonth)
+df <- ddply(df,.(yearmonthf), transform, monthweek=1+week-min(week))  # compute week number of month
+df <- df[, c("year", "yearmonthf", "monthf", "week", "monthweek", "weekdayf", "VIX.Close")]
+head(df)
+#>   year yearmonthf monthf week monthweek weekdayf VIX.Close
+#> 1 2012   Jan 2012    Jan    1         1      Tue     22.97
+#> 2 2012   Jan 2012    Jan    1         1      Wed     22.22
+#> 3 2012   Jan 2012    Jan    1         1      Thu     21.48
+#> 4 2012   Jan 2012    Jan    1         1      Fri     20.63
+#> 5 2012   Jan 2012    Jan    2         2      Mon     21.07
+#> 6 2012   Jan 2012    Jan    2         2      Tue     20.69
+
+
+# Plot
+calheat <- ggplot(df, aes(monthweek, weekdayf, fill = VIX.Close)) + 
+  geom_tile(colour = "white") + 
+  facet_grid(year~monthf) + 
+  scale_fill_gradient(low="red", high="green") +
+  labs(x="Week of Month",
+       y="",
+       title = "Time-Series Calendar Heatmap", 
+       subtitle="Yahoo Closing Price", 
+       fill="Close")
+
+png(filename = "calendarheatmap.png")
+plot(calheat)
+dev.off()
+
+####################################################
+#Slope Chart
+####################################################
+#Uses: library(dplyr)
+
+theme_set(theme_classic())
+source_df <- read.csv("https://raw.githubusercontent.com/jkeirstead/r-slopegraph/master/cancer_survival_rates.csv")
+
+# Define functions. Source: https://github.com/jkeirstead/r-slopegraph
+tufte_sort <- function(df, x="year", y="value", group="group", method="tufte", min.space=0.05) {
+  ## First rename the columns for consistency
+  ids <- match(c(x, y, group), names(df))
+  df <- df[,ids]
+  names(df) <- c("x", "y", "group")
+  
+  ## Expand grid to ensure every combination has a defined value
+  tmp <- expand.grid(x=unique(df$x), group=unique(df$group))
+  tmp <- merge(df, tmp, all.y=TRUE)
+  df <- mutate(tmp, y=ifelse(is.na(y), 0, y))
+  
+  ## Cast into a matrix shape and arrange by first column
+  require(reshape2)
+  tmp <- dcast(df, group ~ x, value.var="y")
+  ord <- order(tmp[,2])
+  tmp <- tmp[ord,]
+  
+  min.space <- min.space*diff(range(tmp[,-1]))
+  yshift <- numeric(nrow(tmp))
+  ## Start at "bottom" row
+  ## Repeat for rest of the rows until you hit the top
+  for (i in 2:nrow(tmp)) {
+    ## Shift subsequent row up by equal space so gap between
+    ## two entries is >= minimum
+    mat <- as.matrix(tmp[(i-1):i, -1])
+    d.min <- min(diff(mat))
+    yshift[i] <- ifelse(d.min < min.space, min.space - d.min, 0)
+  }
+  
+  
+  tmp <- cbind(tmp, yshift=cumsum(yshift))
+  
+  scale <- 1
+  tmp <- melt(tmp, id=c("group", "yshift"), variable.name="x", value.name="y")
+  ## Store these gaps in a separate variable so that they can be scaled ypos = a*yshift + y
+  
+  tmp <- transform(tmp, ypos=y + scale*yshift)
+  return(tmp)
+  
+}
+
+plot_slopegraph <- function(df) {
+  ylabs <- subset(df, x==head(x,1))$group
+  yvals <- subset(df, x==head(x,1))$ypos
+  fontSize <- 3
+  gg <- ggplot(df,aes(x=x,y=ypos)) +
+    geom_line(aes(group=group),colour="grey80") +
+    geom_point(colour="white",size=8) +
+    geom_text(aes(label=y), size=fontSize, family="American Typewriter") +
+    scale_y_continuous(name="", breaks=yvals, labels=ylabs)
+  return(gg)
+}    
+
+## Prepare data    
+df <- tufte_sort(source_df, 
+                 x="year", 
+                 y="value", 
+                 group="group", 
+                 method="tufte", 
+                 min.space=0.05)
+
+df <- transform(df, 
+                x=factor(x, levels=c(5,10,15,20), 
+                         labels=c("5 years","10 years","15 years","20 years")), 
+                y=round(y))
+
+## Plot
+slope <- plot_slopegraph(df) + labs(title="Estimates of % survival rates") + 
+  theme(axis.title=element_blank(),
+        axis.ticks = element_blank(),
+        plot.title = element_text(hjust=0.5,
+                                  family = "American Typewriter",
+                                  face="bold"),
+        axis.text = element_text(family = "American Typewriter",
+                                 face="bold"))
+
+png(filename = "slopechart.png")
+plot(slope)
+dev.off()
+
+####################################################
+#Seasonal Plot
+####################################################
+#Uses: library(ggplot2)
+#Uses: library(forecast)
+
+theme_set(theme_classic())
+
+# Subset data
+nottem_small <- window(nottem, start=c(1920, 1), end=c(1925, 12))  # subset a smaller timewindow
+
+# Plot
+seasonplot1 <- ggseasonplot(AirPassengers) + labs(title="Seasonal plot: International Airline Passengers")
+seasonplot2 <- ggseasonplot(nottem_small) + labs(title="Seasonal plot: Air temperatures at Nottingham Castle")
+
+png(filename = "seasonplot1.png")
+plot(seasonplot1)
+dev.off()
+
+png(filename = "seasonplot2.png")
+plot(seasonplot2)
+dev.off()
+
+####################################################
+#Hierarchical Dendrogram
+####################################################
+#Uses: library(ggplot2)
+#Uses: library(ggdendro)
+
+theme_set(theme_bw())
+
+hc <- hclust(dist(USArrests), "ave")  # hierarchical clustering
+
+# plot
+dendrogram <- ggdendrogram(hc, rotate = TRUE, size = 2)
+
+png(filename = "dendrogram.png")
+plot(dendrogram)
+dev.off()
+
+####################################################
+#Clusters
+####################################################
+#Uses: library(ggplot2)
+#Uses: library(ggalt)
+#Uses: library(ggfortify)
+
+theme_set(theme_classic())
+
+# Compute data with principal components ------------------
+df <- iris[c(1, 2, 3, 4)]
+pca_mod <- prcomp(df)  # compute principal components
+
+# Data frame of principal components ----------------------
+df_pc <- data.frame(pca_mod$x, Species=iris$Species)  # dataframe of principal components
+df_pc_vir <- df_pc[df_pc$Species == "virginica", ]  # df for 'virginica'
+df_pc_set <- df_pc[df_pc$Species == "setosa", ]  # df for 'setosa'
+df_pc_ver <- df_pc[df_pc$Species == "versicolor", ]  # df for 'versicolor'
+
+# Plot ----------------------------------------------------
+clusterplot <- ggplot(df_pc, aes(PC1, PC2, col=Species)) + 
+  geom_point(aes(shape=Species), size=2) +   # draw points
+  labs(title="Iris Clustering", 
+       subtitle="With principal components PC1 and PC2 as X and Y axis",
+       caption="Source: Iris") + 
+  coord_cartesian(xlim = 1.2 * c(min(df_pc$PC1), max(df_pc$PC1)), 
+                  ylim = 1.2 * c(min(df_pc$PC2), max(df_pc$PC2))) +   # change axis limits
+  geom_encircle(data = df_pc_vir, aes(x=PC1, y=PC2)) +   # draw circles
+  geom_encircle(data = df_pc_set, aes(x=PC1, y=PC2)) + 
+  geom_encircle(data = df_pc_ver, aes(x=PC1, y=PC2))
+
+png(filename = "cluster.png")
+plot(clusterplot)
+dev.off()
+
